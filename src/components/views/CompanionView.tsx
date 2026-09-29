@@ -80,13 +80,13 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ store, onNavigateT
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setIsTyping(true);
 
-    // Call server API or deterministic local fallback
-    setTimeout(() => {
-      // 1. Check if user is asking advice or discussing goals
-      const reply = extractFactsFromText(
+    try {
+      // 1. Extract memory facts in parallel to update profile and skills
+      const extracted = extractFactsFromText(
         text,
         profile,
         skills,
@@ -94,8 +94,7 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ store, onNavigateT
         memories
       );
 
-      // Save extracted facts to MemoryStore with conflict checks
-      for (const fact of reply.extractedFacts) {
+      for (const fact of extracted.extractedFacts) {
         if (fact.type === 'profile' && fact.key === 'target_role') {
           store.updateProfile({ targetRole: fact.value });
         } else if (fact.type === 'career_break') {
@@ -135,6 +134,33 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ store, onNavigateT
         }
       }
 
+      // 2. Call live Gemini API route for intelligent dynamic response
+      let aiReplyText = '';
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            profile,
+            skills,
+            tools,
+            history: newMessages.slice(-10),
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.reply) {
+            aiReplyText = data.reply;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API Chat request warning:', apiErr);
+      }
+
+      // If AI returned reply, use it; otherwise fallback to extracted reply text
+      const finalReply = aiReplyText || extracted.replyText;
+
       // If user asked advice, also save structured advice item
       if (text.toLowerCase().includes('how do i') || text.toLowerCase().includes('advice') || text.toLowerCase().includes('should i') || text.toLowerCase().includes('explain my gap')) {
         const targetRoleObj = SEEDED_ROLES.find(r => r.roleName.toLowerCase() === profile.targetRole?.toLowerCase());
@@ -146,13 +172,16 @@ export const CompanionView: React.FC<CompanionViewProps> = ({ store, onNavigateT
       const companionMsg: ChatMessage = {
         id: `comp_${Date.now()}`,
         sender: 'companion',
-        text: reply.replyText,
+        text: finalReply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
       setMessages(prev => [...prev, companionMsg]);
+    } catch (err: any) {
+      console.error('Chat error:', err);
+    } finally {
       setIsTyping(false);
-    }, 450);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
