@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@sap/hana-client": "^2.30.27",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "hdb": "^2.30.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -34,7 +34,6 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
-    "tsx": "^4.21.0",
     "typescript": "^7.0.2"
   }
 }

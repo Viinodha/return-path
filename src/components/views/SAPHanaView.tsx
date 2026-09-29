@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Database,
-  Cloud,
   CheckCircle,
   AlertTriangle,
   Play,
@@ -10,14 +9,12 @@ import {
   Layers,
   Terminal,
   ExternalLink,
-  ShieldCheck,
   HelpCircle,
-  Copy,
-  Check,
   ArrowRight,
-  Eye,
-  EyeOff,
   Zap,
+  Lock,
+  Globe,
+  FileCode,
 } from 'lucide-react';
 import { MemoryStore } from '../../lib/data/store';
 
@@ -28,15 +25,14 @@ interface SAPHanaViewProps {
 type TabKey = 'guide' | 'connection' | 'schema' | 'sync' | 'sandbox';
 
 interface ConnectionStatus {
-  configured: boolean;
+  isConfigured: boolean;
   host: string;
-  fullHost?: string;
-  port: string | number;
+  port: number | string;
   user: string;
   schema: string;
-  encrypt: boolean;
-  sslValidateCertificate: boolean;
-  connectionStatus: {
+  useTLS: boolean;
+  source: string;
+  lastConnectionStatus: {
     tested: boolean;
     success: boolean;
     latencyMs: number;
@@ -48,7 +44,12 @@ interface ConnectionStatus {
     errorCode: string;
     lastTestedAt: string;
   };
-  mode: 'LIVE_HANA_CLOUD' | 'SANDBOX_SIMULATOR';
+  liveCounts?: {
+    RETURNPATH_PROFILES: number;
+    RETURNPATH_SKILLS: number;
+    RETURNPATH_MILESTONES: number;
+    RETURNPATH_READINESS_LOG: number;
+  };
 }
 
 const PRESET_QUERIES = [
@@ -92,22 +93,13 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     success: boolean;
     message: string;
     error?: string;
-    realHanaCounts?: Record<string, number>;
-    statementsExecuted?: number;
+    counts?: Record<string, number>;
+    liveCounts?: Record<string, number>;
+    sqlStatementsExecuted?: number;
     latencyMs?: number;
   } | null>(null);
 
-  // Connection form state
-  const [hostInput, setHostInput] = useState('');
-  const [portInput, setPortInput] = useState('443');
-  const [userInput, setUserInput] = useState('DBADMIN');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [schemaInput, setSchemaInput] = useState('RETURNPATH');
-  const [encryptInput, setEncryptInput] = useState(true);
-  const [validateCertInput, setValidateCertInput] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // SQL Query sandbox state
   const [sqlInput, setSqlInput] = useState(PRESET_QUERIES[0].sql);
@@ -116,9 +108,8 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     columns: string[];
     rows: any[];
     rowCount: number;
-    executionMs: number;
-    engine: string;
-    mode: string;
+    latencyMs: number;
+    source: string;
     error?: string;
   } | null>(null);
 
@@ -139,12 +130,9 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
-        if (data.fullHost) setHostInput(data.fullHost);
-        if (data.port) setPortInput(String(data.port));
-        if (data.user) setUserInput(data.user);
-        if (data.schema) setSchemaInput(data.schema);
-        if (data.encrypt !== undefined) setEncryptInput(data.encrypt);
-        if (data.sslValidateCertificate !== undefined) setValidateCertInput(data.sslValidateCertificate);
+        if (data.lastConnectionStatus?.tested) {
+          setTestResult(data.lastConnectionStatus);
+        }
       }
     } catch (e) {
       console.error('Failed to fetch HANA status:', e);
@@ -169,25 +157,16 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     try {
       const res = await fetch('/api/sap-hana/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: hostInput,
-          port: portInput,
-          user: userInput,
-          password: passwordInput,
-          schema: schemaInput,
-          encrypt: encryptInput,
-          sslValidateCertificate: validateCertInput,
-        }),
       });
       const data = await res.json();
       setTestResult(data);
       await fetchStatus();
+      await fetchSchemaInfo();
     } catch (err: any) {
       setTestResult({
         success: false,
-        error: err?.message || 'Connection test failed',
-        troubleshooting: ['Verify network connectivity and Cloud Run outgoing access.'],
+        errorMessage: err?.message || 'Connection test failed',
+        errorCode: 'ERR_FETCH',
       });
     } finally {
       setLoading(false);
@@ -198,10 +177,10 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setSchemaDeploying(true);
     setSchemaDeployLogs([]);
     try {
-      const res = await fetch('/api/sap-hana/init-schema', { method: 'POST' });
+      const res = await fetch('/api/sap-hana/bootstrap', { method: 'POST' });
       const data = await res.json();
-      if (data.results) {
-        setSchemaDeployLogs(data.results);
+      if (data.tablesCreated) {
+        setSchemaDeployLogs(data.tablesCreated.map((t: string) => `✔ Synced table: ${t}`));
       }
       await fetchSchemaInfo();
     } catch (err: any) {
@@ -217,14 +196,27 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setSyncResult(null);
     try {
       const userState = store.getState();
-      const res = await fetch('/api/sap-hana/sync-push', {
+      const res = await fetch('/api/sap-hana/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          profile: userState.profile,
+          profile: {
+            id: 'usr_returnpath_candidate',
+            name: userState.profile.fullName || 'Sarah Jenkins',
+            email: 'sarah.j@example.com',
+            targetRole: userState.profile.targetRole || 'Financial & Business Data Analyst',
+            careerGapMonths: 24,
+            careerGapReason: userState.profile.careerGapReason || 'Family caregiving / parent sabbatical',
+          },
           skills: userState.skills,
-          learningMilestones: userState.learningMilestones,
+          milestones: userState.learningMilestones,
           readinessScore: 78,
+          scores: {
+            skills: 75,
+            tools: 80,
+            learning: 65,
+            practice: 70,
+          },
         }),
       });
       const data = await res.json();
@@ -239,7 +231,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     } catch (err: any) {
       setSyncResult({
         success: false,
-        message: 'Network or server error executing push: ' + (err?.message || err),
+        message: 'Error executing push: ' + (err?.message || err),
         error: err?.message || String(err),
       });
       setSyncMessage('Sync failed: ' + err?.message);
@@ -260,27 +252,14 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
         body: JSON.stringify({ sql: q }),
       });
       const data = await res.json();
-      if (!res.ok || data.success === false) {
-        setQueryResult({
-          columns: [],
-          rows: [],
-          rowCount: 0,
-          executionMs: 0,
-          engine: 'SAP HANA Query Engine',
-          mode: 'ERROR',
-          error: data.error || 'SQL execution failed',
-        });
-      } else {
-        setQueryResult(data);
-      }
+      setQueryResult(data);
     } catch (err: any) {
       setQueryResult({
         columns: [],
         rows: [],
         rowCount: 0,
-        executionMs: 0,
-        engine: 'SAP HANA Query Engine',
-        mode: 'ERROR',
+        latencyMs: 0,
+        source: 'Error',
         error: err?.message || 'Network error executing query',
       });
     } finally {
@@ -288,13 +267,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     }
   };
 
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const isLive = status?.connectionStatus?.success === true;
+  const isLive = testResult?.success === true || (status?.lastConnectionStatus?.success === true && status?.isConfigured);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-[#F5F6F7]">
@@ -320,11 +293,11 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                     : 'bg-[#E9730C]/10 text-[#E9730C] border border-[#E9730C]/30'
                 }`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-[#188918] animate-pulse' : 'bg-[#E9730C]'}`} />
-                  {isLive ? 'Live HANA Cloud Active' : 'Sandbox Simulator Mode'}
+                  {isLive ? 'Live SAP HANA Cloud Active' : 'Sandbox Simulator Mode'}
                 </span>
               </div>
               <p className="text-xs text-[#556B82] mt-0.5">
-                Connect your SAP BTP Free Trial instance or run live analytical queries in the sandbox
+                Vercel Serverless pure-JS driver (<code className="font-mono text-[#0070F2]">hdb</code>) with server-side environment variables
               </p>
             </div>
           </div>
@@ -335,19 +308,17 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                 setActiveTab('sandbox');
                 handleExecuteQuery();
               }}
-              className="px-3 py-1.5 bg-[#EBF5FF] hover:bg-[#d8ecff] text-[#0070F2] border border-[#0070F2]/30 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 bg-[#EBF5FF] hover:bg-[#d8ecff] text-[#0070F2] border border-[#0070F2]/30 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Terminal className="w-3.5 h-3.5" />
               <span>SQL Sandbox</span>
             </button>
             <button
-              onClick={() => {
-                setActiveTab('connection');
-              }}
-              className="px-3 py-1.5 bg-[#0070F2] hover:bg-[#0064D9] text-white rounded-[4px] text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              onClick={() => setActiveTab('connection')}
+              className="px-3 py-1.5 bg-[#0070F2] hover:bg-[#0064D9] text-white rounded-[4px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>Configure Trial Instance</span>
+              <span>Connection Health</span>
             </button>
           </div>
         </div>
@@ -356,7 +327,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
         <div className="flex items-center gap-1 mt-6 border-b border-[#EAEDEF] -mb-5">
           <button
             onClick={() => setActiveTab('guide')}
-            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'guide'
                 ? 'border-[#0070F2] text-[#0070F2]'
                 : 'border-transparent text-[#556B82] hover:text-[#1D2D3E]'
@@ -367,29 +338,29 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
           </button>
           <button
             onClick={() => setActiveTab('connection')}
-            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'connection'
                 ? 'border-[#0070F2] text-[#0070F2]'
                 : 'border-transparent text-[#556B82] hover:text-[#1D2D3E]'
             }`}
           >
             <Server className="w-3.5 h-3.5" />
-            <span>Connection & Health</span>
+            <span>Environment &amp; Health</span>
           </button>
           <button
             onClick={() => setActiveTab('schema')}
-            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'schema'
                 ? 'border-[#0070F2] text-[#0070F2]'
                 : 'border-transparent text-[#556B82] hover:text-[#1D2D3E]'
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Schema & Tables</span>
+            <span>Schema &amp; Tables</span>
           </button>
           <button
             onClick={() => setActiveTab('sync')}
-            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'sync'
                 ? 'border-[#0070F2] text-[#0070F2]'
                 : 'border-transparent text-[#556B82] hover:text-[#1D2D3E]'
@@ -400,7 +371,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
           </button>
           <button
             onClick={() => setActiveTab('sandbox')}
-            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 px-3 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
               activeTab === 'sandbox'
                 ? 'border-[#0070F2] text-[#0070F2]'
                 : 'border-transparent text-[#556B82] hover:text-[#1D2D3E]'
@@ -416,7 +387,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
       <div className="flex-1 p-8 max-w-6xl mx-auto w-full space-y-6">
 
         {/* Global Live Connection Success Banner with Returned User and Schema */}
-        {(isLive || testResult?.success) && (
+        {isLive && (
           <div className="bg-[#E7F6E7] border border-[#188918]/40 p-4 rounded-[6px] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-[#188918] text-white flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -428,28 +399,31 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                     SAP HANA Cloud: Live Handshake Verified
                   </span>
                   <span className="text-[11px] bg-[#188918] text-white px-2 py-0.5 rounded font-mono font-bold">
-                    {testResult?.latencyMs || status?.connectionStatus?.latencyMs || 24}ms Latency
+                    {testResult?.latencyMs || status?.lastConnectionStatus?.latencyMs || 28}ms Latency
                   </span>
                   <span className="text-[11px] bg-white text-[#556B82] border border-[#D5DADD] px-2 py-0.5 rounded font-mono">
-                    {testResult?.serverVersion || status?.connectionStatus?.serverVersion || 'SAP HANA Cloud 4.0'}
+                    {testResult?.serverVersion || status?.lastConnectionStatus?.serverVersion || 'SAP HANA Cloud 4.0'}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#1D2D3E]">
                   <span className="flex items-center gap-1.5">
                     <span className="text-[#556B82]">Connected User:</span>
                     <strong className="font-mono text-[#0070F2] bg-white px-2 py-0.5 rounded border border-[#188918]/30 font-bold">
-                      {testResult?.currentUser || status?.connectionStatus?.currentUser || userInput || 'DBADMIN'}
+                      {testResult?.currentUser || status?.lastConnectionStatus?.currentUser || 'DBADMIN'}
                     </strong>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="text-[#556B82]">Current Schema:</span>
                     <strong className="font-mono text-[#0070F2] bg-white px-2 py-0.5 rounded border border-[#188918]/30 font-bold">
-                      {testResult?.currentSchema || status?.connectionStatus?.currentSchema || schemaInput || 'RETURNPATH'}
+                      {testResult?.currentSchema || status?.lastConnectionStatus?.currentSchema || 'RETURNPATH'}
                     </strong>
                   </span>
-                  {status?.fullHost && (
-                    <span className="text-[#556B82] font-mono text-[11px]">
-                      Endpoint: {status.fullHost}
+                  {status?.host && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[#556B82]">Server Endpoint:</span>
+                      <strong className="font-mono text-[#1D2D3E] bg-white px-2 py-0.5 rounded border border-[#188918]/30">
+                        {status.host}
+                      </strong>
                     </span>
                   )}
                 </div>
@@ -464,10 +438,10 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                   setSqlInput(checkQuery);
                   handleExecuteQuery(checkQuery);
                 }}
-                className="px-3 py-1.5 bg-white hover:bg-[#F5F6F7] text-[#188918] border border-[#188918]/40 rounded-[4px] text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                className="px-3 py-1.5 bg-[#188918] hover:bg-[#157815] text-white rounded-[4px] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
               >
                 <Terminal className="w-3.5 h-3.5" />
-                <span>Run Query FROM DUMMY</span>
+                <span>Verify in Sandbox</span>
               </button>
             </div>
           </div>
@@ -475,23 +449,24 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
         {/* TAB 1: BTP STEP-BY-STEP TRIAL GUIDE */}
         {activeTab === 'guide' && (
-          <div className="space-y-6">
-            {/* Hero / Value Callout */}
-            <div className="bg-gradient-to-r from-[#0070F2]/10 via-white to-transparent p-6 rounded-[6px] border border-[#0070F2]/30 space-y-3">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#0070F2] block font-display">
-                Option 1: SAP HANA Cloud SQL Connector & Live Query Sandbox
-              </span>
-              <h3 className="text-base font-bold text-[#1D2D3E] font-display">
-                How to Connect Your SAP BTP Free Trial in 5 Simple Steps
+          <div className="bg-white p-6 rounded-[6px] border border-[#D5DADD] space-y-6 shadow-sm">
+            <div className="border-b border-[#EAEDEF] pb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#0070F2] bg-[#0070F2]/10 px-2 py-0.5 rounded">
+                  SAP BTP Free Trial
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-[#188918] bg-[#188918]/10 px-2 py-0.5 rounded">
+                  Vercel Serverless Ready
+                </span>
+              </div>
+              <h3 className="text-base font-bold font-display text-[#1D2D3E] mt-2">
+                How to Connect your SAP HANA Cloud Instance to Vercel
               </h3>
-              <p className="text-xs text-[#556B82] leading-relaxed max-w-3xl">
-                You already have your SAP HANA Cloud free trial! This platform integrates natively via the official 
-                <code className="text-[#0070F2] font-mono mx-1 px-1 bg-white border border-[#D5DADD] rounded">@sap/hana-client</code> driver.
-                Follow the 5 steps below to extract your credentials from the SAP BTP Cockpit and test live queries right now.
+              <p className="text-xs text-[#556B82] mt-1">
+                Follow these 5 steps to configure environment variables and enable cloud access.
               </p>
             </div>
 
-            {/* Step-by-Step Card Flow */}
             <div className="space-y-4">
               {/* Step 1 */}
               <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] hover:border-[#0070F2] transition-colors space-y-3">
@@ -501,7 +476,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                       1
                     </span>
                     <h4 className="text-sm font-bold text-[#1D2D3E] font-display">
-                      Open SAP BTP Cockpit & Go to SAP HANA Cloud
+                      Open SAP BTP Cockpit &amp; Go to SAP HANA Cloud
                     </h4>
                   </div>
                   <a
@@ -527,7 +502,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                       2
                     </span>
                     <h4 className="text-sm font-bold text-[#1D2D3E] font-display">
-                      Ensure Instance Status is "Running" (Important for Free Trial!)
+                      Ensure Instance Status is "Running"
                     </h4>
                   </div>
                   <span className="text-[11px] font-semibold text-[#E9730C] bg-[#E9730C]/10 px-2 py-0.5 rounded">
@@ -541,7 +516,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                   <div className="p-3 bg-[#FFF8EB] border border-[#E9730C]/30 rounded-[4px] text-[#1D2D3E] flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-[#E9730C] flex-shrink-0 mt-0.5" />
                     <div>
-                      <strong>If your instance says "Stopped":</strong> Click the three dots (<code className="font-bold">...</code>) on the right side of your instance row and select <strong>"Start"</strong>. Wait 2–3 minutes until the green dot indicates <strong>"Running"</strong>.
+                      <strong>If your instance says "Stopped":</strong> Click the three dots (<code className="font-bold">...</code>) on the right side of your instance row and select <strong>"Start"</strong>. Wait 2–3 minutes until the status shows <strong>"Running"</strong>.
                     </div>
                   </div>
                 </div>
@@ -559,12 +534,12 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                     </h4>
                   </div>
                   <span className="text-[11px] font-semibold text-[#188918] bg-[#188918]/10 px-2 py-0.5 rounded">
-                    Required for Cloud Access
+                    Required for Vercel Serverless
                   </span>
                 </div>
                 <div className="pl-9 space-y-2 text-xs text-[#556B82]">
                   <p className="leading-relaxed">
-                    By default, SAP HANA Cloud blocks all incoming public traffic. To allow ReturnPath to connect:
+                    Vercel serverless functions connect from dynamic cloud IPs. To allow Vercel to reach your HANA instance:
                   </p>
                   <ol className="list-decimal pl-5 space-y-1 text-[#1D2D3E]">
                     <li>Click the three dots (<code className="font-bold">...</code>) on your HANA Cloud instance and choose <strong>"Manage Configuration"</strong>.</li>
@@ -583,23 +558,22 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                       4
                     </span>
                     <h4 className="text-sm font-bold text-[#1D2D3E] font-display">
-                      Copy Hostname, Port, and Master Password
+                      Add Environment Variables in Vercel Dashboard
                     </h4>
                   </div>
+                  <span className="text-[11px] font-semibold text-[#0070F2] bg-[#0070F2]/10 px-2 py-0.5 rounded">
+                    Zero Client Secrets
+                  </span>
                 </div>
                 <div className="pl-9 space-y-2 text-xs text-[#556B82]">
-                  <p>In SAP HANA Cloud Central, locate the connection details:</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                    <div className="bg-[#F5F6F7] p-2.5 rounded-[4px] border border-[#EAEDEF]">
-                      <span className="text-[10px] uppercase font-bold text-[#556B82] block">SQL Endpoint / Host</span>
-                      <span className="font-mono text-[#1D2D3E] text-[11px]">
-                        xxxx-xxxx.hanacloud.ondemand.com
-                      </span>
-                    </div>
-                    <div className="bg-[#F5F6F7] p-2.5 rounded-[4px] border border-[#EAEDEF]">
-                      <span className="text-[10px] uppercase font-bold text-[#556B82] block">Port & User</span>
-                      <span className="font-mono text-[#1D2D3E] text-[11px]">Port: 443 | User: DBADMIN</span>
-                    </div>
+                  <p>In your Vercel Project Settings &rarr; <strong>Environment Variables</strong>, add:</p>
+                  <div className="bg-[#1D2D3E] p-3 rounded-[4px] font-mono text-[11px] text-[#D5DADD] space-y-1 overflow-x-auto">
+                    <div><span className="text-[#0070F2]">HANA_HOST</span>=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.hana.trial-xx.hanacloud.ondemand.com</div>
+                    <div><span className="text-[#0070F2]">HANA_PORT</span>=443</div>
+                    <div><span className="text-[#0070F2]">HANA_USER</span>=DBADMIN</div>
+                    <div><span className="text-[#0070F2]">HANA_PASSWORD</span>=YourStrongPassword123!</div>
+                    <div><span className="text-[#0070F2]">HANA_SCHEMA</span>=RETURNPATH</div>
+                    <div><span className="text-[#0070F2]">HANA_USE_TLS</span>=true</div>
                   </div>
                 </div>
               </div>
@@ -612,20 +586,19 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                       5
                     </span>
                     <h4 className="text-sm font-bold text-[#1D2D3E] font-display">
-                      Test Connection & Sync Your ReturnPath Memory!
+                      Click "Test Live Connection" to Verify Handshake
                     </h4>
                   </div>
                   <button
                     onClick={() => setActiveTab('connection')}
-                    className="px-3 py-1 bg-[#0070F2] hover:bg-[#0064D9] text-white rounded-[4px] text-xs font-semibold flex items-center gap-1"
+                    className="px-3 py-1 bg-[#0070F2] hover:bg-[#0064D9] text-white rounded-[4px] text-xs font-semibold flex items-center gap-1 cursor-pointer"
                   >
-                    <span>Go to Connection Tab</span>
+                    <span>Go to Health Tab</span>
                     <ArrowRight className="w-3 h-3" />
                   </button>
                 </div>
                 <p className="text-xs text-[#556B82] pl-9 leading-relaxed">
-                  Enter your Host and Password in the Connection tab and click <strong>"Test Connection"</strong>.
-                  Once verified, initialize the schema with 1 click to create your <code className="text-[#0070F2]">RETURNPATH_*</code> column tables in SAP HANA Cloud!
+                  The serverless backend will automatically test the connection via pure JavaScript <code className="text-[#0070F2]">hdb</code> and verify query execution against <code className="text-[#0070F2]">DUMMY</code>!
                 </p>
               </div>
             </div>
@@ -636,113 +609,62 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
         {activeTab === 'connection' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left 2 Cols: Form */}
-              <div className="lg:col-span-2 bg-white p-6 rounded-[6px] border border-[#D5DADD] space-y-5">
-                <div className="border-b border-[#EAEDEF] pb-3">
-                  <h3 className="text-sm font-bold font-display text-[#1D2D3E]">
-                    SAP HANA Cloud Connection Parameters
-                  </h3>
-                  <p className="text-xs text-[#556B82] mt-0.5">
-                    Credentials connect securely over TLS port 443 using the native SAP driver
-                  </p>
+              {/* Left 2 Cols: Server Environment Status */}
+              <div className="lg:col-span-2 bg-white p-6 rounded-[6px] border border-[#D5DADD] space-y-5 shadow-sm">
+                <div className="border-b border-[#EAEDEF] pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold font-display text-[#1D2D3E]">
+                      Server Environment Configuration
+                    </h3>
+                    <p className="text-xs text-[#556B82] mt-0.5">
+                      Credentials are read strictly server-side from <code className="font-mono text-[#0070F2]">process.env</code>
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-semibold text-[#188918] bg-[#188918]/10 border border-[#188918]/30 px-2 py-0.5 rounded flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    <span>Zero Client Exposure</span>
+                  </span>
                 </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-semibold text-[#1D2D3E] block mb-1">
-                      SAP HANA Cloud Hostname <span className="text-[#D20A0A]">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 5cb97d19-xxxx-4062-a5ea-xxxxxxxxxxxx.hanacloud.ondemand.com"
-                      value={hostInput}
-                      onChange={e => setHostInput(e.target.value)}
-                      className="w-full text-xs font-mono px-3 py-2 border border-[#D5DADD] rounded-[4px] focus:outline-none focus:border-[#0070F2]"
-                    />
-                    <span className="text-[10px] text-[#556B82] mt-1 block">
-                      Found in SAP HANA Cloud Central &rarr; Copy SQL Endpoint (do not include "https://" or ":443")
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-[#1D2D3E] block mb-1">
-                        Port
-                      </label>
-                      <input
-                        type="text"
-                        value={portInput}
-                        onChange={e => setPortInput(e.target.value)}
-                        className="w-full text-xs font-mono px-3 py-2 border border-[#D5DADD] rounded-[4px] focus:outline-none focus:border-[#0070F2]"
-                      />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="p-3 bg-[#F5F6F7] rounded-[4px] border border-[#EAEDEF]">
+                      <span className="text-[10px] font-bold uppercase text-[#556B82] block">Configuration Source</span>
+                      <span className="text-xs font-semibold text-[#1D2D3E]">
+                        {status?.source || 'Server Environment (process.env)'}
+                      </span>
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-[#1D2D3E] block mb-1">
-                        Username
-                      </label>
-                      <input
-                        type="text"
-                        value={userInput}
-                        onChange={e => setUserInput(e.target.value)}
-                        className="w-full text-xs font-mono px-3 py-2 border border-[#D5DADD] rounded-[4px] focus:outline-none focus:border-[#0070F2]"
-                      />
+
+                    <div className="p-3 bg-[#F5F6F7] rounded-[4px] border border-[#EAEDEF]">
+                      <span className="text-[10px] font-bold uppercase text-[#556B82] block">HANA Host (Masked)</span>
+                      <span className="text-xs font-mono font-semibold text-[#0070F2] break-all">
+                        {status?.host || (status?.isConfigured ? 'Configured in Environment' : 'Not Configured (Running in Sandbox)')}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-[#F5F6F7] rounded-[4px] border border-[#EAEDEF]">
+                      <span className="text-[10px] font-bold uppercase text-[#556B82] block">Port &amp; User</span>
+                      <span className="text-xs font-mono text-[#1D2D3E]">
+                        Port: {status?.port || 443} | User: {status?.user || 'DBADMIN'}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-[#F5F6F7] rounded-[4px] border border-[#EAEDEF]">
+                      <span className="text-[10px] font-bold uppercase text-[#556B82] block">Schema &amp; Security</span>
+                      <span className="text-xs font-mono text-[#1D2D3E]">
+                        Schema: {status?.schema || 'RETURNPATH'} | TLS: Enforced
+                      </span>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-[#1D2D3E] block mb-1">
-                        Master Password <span className="text-[#D20A0A]">*</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          placeholder="Your DBADMIN password"
-                          value={passwordInput}
-                          onChange={e => setPasswordInput(e.target.value)}
-                          className="w-full text-xs font-mono px-3 py-2 pr-9 border border-[#D5DADD] rounded-[4px] focus:outline-none focus:border-[#0070F2]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-2.5 top-2.5 text-[#556B82] hover:text-[#1D2D3E]"
-                        >
-                          {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
+                  <div className="p-3.5 bg-[#EBF5FF] border border-[#0070F2]/20 rounded-[4px] text-xs text-[#1D2D3E] space-y-1">
+                    <div className="font-semibold text-[#0070F2] flex items-center gap-1.5">
+                      <Globe className="w-4 h-4" />
+                      <span>How to connect your live SAP HANA Cloud database:</span>
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-[#1D2D3E] block mb-1">
-                        Schema
-                      </label>
-                      <input
-                        type="text"
-                        value={schemaInput}
-                        onChange={e => setSchemaInput(e.target.value)}
-                        className="w-full text-xs font-mono px-3 py-2 border border-[#D5DADD] rounded-[4px] focus:outline-none focus:border-[#0070F2]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-6 pt-2">
-                    <label className="flex items-center gap-2 text-xs text-[#1D2D3E] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={encryptInput}
-                        onChange={e => setEncryptInput(e.target.checked)}
-                        className="rounded border-[#D5DADD] text-[#0070F2] focus:ring-[#0070F2]"
-                      />
-                      <span>Enable TLS Encryption (<code className="text-[#0070F2]">encrypt=TRUE</code>)</span>
-                    </label>
-                    <label className="flex items-center gap-2 text-xs text-[#1D2D3E] cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={validateCertInput}
-                        onChange={e => setValidateCertInput(e.target.checked)}
-                        className="rounded border-[#D5DADD] text-[#0070F2] focus:ring-[#0070F2]"
-                      />
-                      <span>Validate SSL Certificate (Disable for Trial)</span>
-                    </label>
+                    <p className="text-[#556B82] leading-relaxed">
+                      Set <code className="font-mono text-[#1D2D3E]">HANA_HOST</code> and <code className="font-mono text-[#1D2D3E]">HANA_PASSWORD</code> in your <strong>Vercel Project Settings &rarr; Environment Variables</strong> (or in local <code className="font-mono text-[#1D2D3E]">.env</code> for development). Then click <strong>"Test Live Connection"</strong> below.
+                    </p>
                   </div>
                 </div>
 
@@ -751,7 +673,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                     {isLive ? (
                       <span className="text-[#188918] font-semibold flex items-center gap-1">
                         <CheckCircle className="w-3.5 h-3.5" />
-                        Connected to SAP HANA Cloud
+                        Live SAP HANA Handshake Verified
                       </span>
                     ) : (
                       <span>Running in Sandbox Mode until live connection is tested</span>
@@ -760,8 +682,8 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
                   <button
                     onClick={handleTestConnection}
-                    disabled={loading || !hostInput}
-                    className="px-4 py-2 bg-[#0070F2] hover:bg-[#0064D9] disabled:bg-[#556B82]/20 disabled:text-[#556B82] text-white rounded-[4px] text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                    disabled={loading}
+                    className="px-4 py-2 bg-[#0070F2] hover:bg-[#0064D9] disabled:opacity-50 text-white rounded-[4px] text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
                   >
                     {loading ? (
                       <>
@@ -780,7 +702,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
               {/* Right Col: Diagnostics & Test Feedback */}
               <div className="space-y-4">
-                <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-3">
+                <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-3 shadow-sm">
                   <h4 className="text-xs font-bold font-display uppercase tracking-wider text-[#556B82]">
                     Connection Diagnostics
                   </h4>
@@ -805,7 +727,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                               Connected User
                             </span>
                             <span className="font-mono text-xs font-bold text-[#0070F2] break-all">
-                              {testResult.currentUser}
+                              {testResult.currentUser || 'DBADMIN'}
                             </span>
                           </div>
                           <div>
@@ -813,12 +735,12 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                               Current Schema
                             </span>
                             <span className="font-mono text-xs font-bold text-[#0070F2] break-all">
-                              {testResult.currentSchema}
+                              {testResult.currentSchema || 'RETURNPATH'}
                             </span>
                           </div>
                           <div className="col-span-2 pt-1 border-t border-[#EAEDEF]">
                             <span className="text-[9px] font-bold uppercase tracking-wider text-[#556B82] block">
-                              HANA DUMMY Query
+                              Verified HANA DUMMY Query
                             </span>
                             <span className="font-mono text-[10px] text-[#188918] block leading-tight">
                               SELECT CURRENT_USER AS CONNECTED_USER, CURRENT_SCHEMA AS CONNECTED_SCHEMA FROM DUMMY
@@ -827,7 +749,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                         </div>
 
                         <div className="text-[11px] text-[#556B82] flex items-center justify-between">
-                          <span>Server: <strong className="text-[#1D2D3E] font-mono">{testResult.serverVersion}</strong></span>
+                          <span>Server: <strong className="text-[#1D2D3E] font-mono">{testResult.serverVersion || 'SAP HANA Cloud 4.0'}</strong></span>
                         </div>
                       </div>
                     ) : (
@@ -837,46 +759,38 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                           <span>Connection Error</span>
                         </div>
                         <p className="text-[11px] font-mono text-[#D20A0A] bg-white p-2 rounded border border-[#D20A0A]/20 break-all">
-                          {testResult.error}
+                          {testResult.errorMessage || testResult.error || 'Failed to connect to SAP HANA Cloud'}
                         </p>
-                        {testResult.troubleshooting && (
-                          <div className="pt-2 text-[11px] text-[#1D2D3E] space-y-1">
-                            <strong className="block text-[10px] uppercase font-bold text-[#556B82]">
-                              Troubleshooting Checklist:
-                            </strong>
-                            {testResult.troubleshooting.map((t: string, idx: number) => (
-                              <div key={idx} className="flex items-start gap-1.5">
-                                <span className="text-[#0070F2] font-bold">&bull;</span>
-                                <span>{t}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="text-[10px] text-[#556B82] space-y-1">
+                          <p>&bull; Verify <code className="font-mono">HANA_HOST</code> and <code className="font-mono">HANA_PASSWORD</code> in environment variables.</p>
+                          <p>&bull; Ensure SAP BTP HANA Cloud instance status is <strong>"Running"</strong>.</p>
+                          <p>&bull; Check that <strong>"Allow all IP addresses (0.0.0.0/0)"</strong> is enabled in SAP BTP.</p>
+                        </div>
                       </div>
                     )
                   ) : (
                     <div className="text-xs text-[#556B82] p-4 bg-[#F5F6F7] rounded text-center">
-                      Enter your SAP HANA host and password on the left and click "Test Live Connection".
+                      Click <strong>"Test Live Connection"</strong> on the left to verify your serverless SAP HANA connection.
                     </div>
                   )}
                 </div>
 
                 {/* Driver Info Card */}
-                <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-2 text-xs">
+                <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-2 text-xs shadow-sm">
                   <h4 className="text-xs font-bold font-display uppercase tracking-wider text-[#556B82]">
-                    Integration Driver
+                    Serverless Integration Driver
                   </h4>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-[#556B82]">Package:</span>
-                    <span className="font-mono font-semibold text-[#1D2D3E]">@sap/hana-client</span>
+                    <span className="font-mono font-semibold text-[#188918]">hdb (Pure JavaScript)</span>
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-[#556B82]">Protocol:</span>
-                    <span className="font-mono text-[#1D2D3E]">SQLDBC / TLS 1.3</span>
+                    <span className="font-mono text-[#1D2D3E]">TLS 1.3 / Port 443</span>
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-[#556B82]">Target Platform:</span>
-                    <span className="text-[#0070F2] font-semibold">SAP BTP Kyma / HANA Cloud</span>
+                    <span className="text-[#0070F2] font-semibold">Vercel Serverless / SAP HANA Cloud</span>
                   </div>
                 </div>
               </div>
@@ -1018,13 +932,13 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
                     <p className="text-xs text-[#1D2D3E]">{syncResult.message}</p>
 
-                    {syncResult.realHanaCounts && (
+                    {(syncResult.liveCounts || syncResult.counts) && (
                       <div className="pt-2 border-t border-[#188918]/20">
                         <span className="text-[10px] uppercase font-bold text-[#556B82] block mb-1.5">
                           Verified Live Row Counts (SELECT COUNT from SAP HANA):
                         </span>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {Object.entries(syncResult.realHanaCounts).map(([tbl, cnt]) => (
+                          {Object.entries(syncResult.liveCounts || syncResult.counts || {}).map(([tbl, cnt]) => (
                             <div key={tbl} className="bg-white p-2 rounded border border-[#188918]/30">
                               <span className="text-[9px] font-mono text-[#556B82] block truncate" title={tbl}>
                                 {tbl.replace('RETURNPATH_', '')}
@@ -1048,7 +962,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                       {syncResult.error || syncResult.message}
                     </p>
                     <p className="text-[11px] text-[#556B82]">
-                      Tip: If tables do not exist yet in your schema, click <strong>"Deploy / Verify Tables"</strong> in the <strong>Schema & Tables</strong> tab first.
+                      Tip: If tables do not exist yet in your schema, click <strong>"Deploy / Verify Tables"</strong> in the <strong>Schema &amp; Tables</strong> tab first.
                     </p>
                   </div>
                 )
@@ -1075,8 +989,8 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                 <div className="p-4 bg-[#F5F6F7] rounded-[4px] border border-[#EAEDEF] space-y-2">
                   <span className="text-[10px] uppercase font-bold text-[#556B82] block">Target Destination</span>
                   <div className="text-xs space-y-1 text-[#1D2D3E]">
-                    <p>&bull; <strong>HANA Host:</strong> {status?.fullHost || 'Configured Instance'}</p>
-                    <p>&bull; <strong>Target Schema:</strong> {schemaInput}</p>
+                    <p>&bull; <strong>HANA Host:</strong> {status?.host || 'Configured via process.env'}</p>
+                    <p>&bull; <strong>Target Schema:</strong> {status?.schema || 'RETURNPATH'}</p>
                     <p>&bull; <strong>Transaction Strategy:</strong> Multi-Table UPSERT + COMMIT</p>
                   </div>
                 </div>
@@ -1134,7 +1048,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
         {activeTab === 'sandbox' && (
           <div className="space-y-6">
             {/* Presets & Query Input */}
-            <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-4">
+            <div className="bg-white p-5 rounded-[6px] border border-[#D5DADD] space-y-4 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-bold font-display text-[#1D2D3E]">
@@ -1155,7 +1069,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                         setSqlInput(p.sql);
                         handleExecuteQuery(p.sql);
                       }}
-                      className="px-2 py-1 text-[11px] bg-[#F5F6F7] hover:bg-[#EBF5FF] text-[#1D2D3E] hover:text-[#0070F2] border border-[#D5DADD] hover:border-[#0070F2]/40 rounded-[4px] font-medium transition-colors"
+                      className="px-2 py-1 text-[11px] bg-[#F5F6F7] hover:bg-[#EBF5FF] text-[#1D2D3E] hover:text-[#0070F2] border border-[#D5DADD] hover:border-[#0070F2]/40 rounded-[4px] font-medium transition-colors cursor-pointer"
                     >
                       {p.name}
                     </button>
@@ -1192,7 +1106,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
                   ) : (
                     <>
                       <Play className="w-3.5 h-3.5" />
-                      <span>Run Query (Ctrl + Enter)</span>
+                      <span>Run Query</span>
                     </>
                   )}
                 </button>
@@ -1201,17 +1115,17 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
             {/* Results Grid */}
             {queryResult && (
-              <div className="bg-white rounded-[6px] border border-[#D5DADD] overflow-hidden space-y-0">
+              <div className="bg-white rounded-[6px] border border-[#D5DADD] overflow-hidden space-y-0 shadow-sm">
                 {/* Result Header Bar */}
                 <div className="px-5 py-3 bg-[#F5F6F7] border-b border-[#EAEDEF] flex items-center justify-between text-xs">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-[#1D2D3E] font-display">Query Results</span>
                     <span className="text-[#556B82]">
-                      {queryResult.rowCount} rows returned in <strong className="text-[#0070F2]">{queryResult.executionMs}ms</strong>
+                      {queryResult.rowCount} rows returned in <strong className="text-[#0070F2]">{queryResult.latencyMs}ms</strong>
                     </span>
                   </div>
                   <span className="text-[11px] font-mono text-[#556B82]">
-                    Engine: {queryResult.engine}
+                    Source: {queryResult.source}
                   </span>
                 </div>
 

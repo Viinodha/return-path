@@ -1,8 +1,34 @@
+# Dependencies
 node_modules/
-build/
+.pnp
+.pnp.js
+
+# Production build outputs
 dist/
-coverage/
+dist-ssr/
+build/
+*.local
+
+# Environment variables & secrets (NEVER commit to Git)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS & Editor files
 .DS_Store
-*.log
-.env*
-!.env.example
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
