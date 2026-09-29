@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+
+  --color-primary: #0070F2;
+  --color-primary-hover: #0064D9;
+  --color-primary-tint: #EBF5FF;
+  --color-page: #F5F6F7;
+  --color-surface: #FFFFFF;
+  --color-border: #D5DADD;
+  --color-divider: #EAEDEF;
+  --color-text-main: #1D2D3E;
+  --color-text-muted: #556B82;
+  --color-success: #188918;
+  --color-warning: #E76500;
+  --color-error: #D20A0A;
+}
+
+:root {
+  --primary: #0070F2;
+  --primary-hover: #0064D9;
+  --primary-tint: #EBF5FF;
+  --page-bg: #F5F6F7;
+  --surface-bg: #FFFFFF;
+  --border-color: #D5DADD;
+  --divider-color: #EAEDEF;
+  --text-primary: #1D2D3E;
+  --text-secondary: #556B82;
+  --success: #188918;
+  --warning: #E76500;
+  --error: #D20A0A;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background-color: #F5F6F7;
+  color: #1D2D3E;
+}
+
+h1, h2, h3, h4, h5, h6, .font-display {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+.section-label {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #556B82;
+}
+
+/* Custom scrollbar for dense enterprise UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F5F6F7;
+}
+::-webkit-scrollbar-thumb {
+  background: #D5DADD;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #556B82;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "ReturnPath - AI Career Re-entry Platform",
+  "description": "An AI-orchestrated career re-entry platform for returning professionals, featuring memory persistence, deterministic readiness scoring, adaptive learning paths, ATS resume scanning, mock interviews, and consultant reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
