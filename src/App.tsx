@@ -13,6 +13,7 @@ import { ResumeView } from './components/views/ResumeView';
 import { InterviewView } from './components/views/InterviewView';
 import { JobsView } from './components/views/JobsView';
 import { ReportView } from './components/views/ReportView';
+import { SAPHanaView } from './components/views/SAPHanaView';
 
 import { calculateCareerReadiness } from './lib/readiness';
 import { SEEDED_ROLES } from './lib/data/seed';
@@ -63,6 +64,7 @@ export default function App() {
     interview: 'Practice & Project Coach',
     jobs: 'Job Matching & Alignment',
     report: 'Consultant Report & Strategy',
+    hana: 'SAP HANA Cloud Integration Center',
   };
 
   return (
@@ -86,6 +88,7 @@ export default function App() {
           targetRole={profile.targetRole}
           onOpenReadiness={() => setIsReadinessOpen(true)}
           onOpenSAPModal={() => setIsSAPModalOpen(true)}
+          onOpenHana={() => setActiveTab('hana')}
         />
 
         <main className="flex-1 flex overflow-y-auto">
@@ -135,6 +138,10 @@ export default function App() {
 
           {activeTab === 'report' && (
             <ReportView store={memoryStore} />
+          )}
+
+          {activeTab === 'hana' && (
+            <SAPHanaView store={memoryStore} />
           )}
         </main>
       </div>

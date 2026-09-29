@@ -8,6 +8,7 @@ interface TopBarProps {
   targetRole?: string;
   onOpenReadiness: () => void;
   onOpenSAPModal?: () => void;
+  onOpenHana?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -16,6 +17,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   targetRole,
   onOpenReadiness,
   onOpenSAPModal,
+  onOpenHana,
 }) => {
   return (
     <header className="h-14 bg-white border-b border-[#D5DADD] px-6 flex items-center justify-between sticky top-0 z-30 select-none">
@@ -28,6 +30,17 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Right Actions: SAP Architecture info + Career Readiness Chip */}
       <div className="flex items-center gap-3">
+        {onOpenHana && (
+          <button
+            onClick={onOpenHana}
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#0070F2] bg-[#EBF5FF] hover:bg-[#d8ecff] border border-[#0070F2]/30 rounded-[4px] transition-colors"
+            title="SAP HANA Cloud Live Query & BTP Trial Center"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0070F2] animate-pulse" />
+            <span className="font-bold">HANA Cloud</span>
+          </button>
+        )}
+
         {onOpenSAPModal && (
           <button
             onClick={onOpenSAPModal}

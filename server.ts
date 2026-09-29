@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { registerSAPHanaRoutes } from './server-hana.js';
 
 dotenv.config();
 
@@ -22,6 +23,9 @@ app.get('/healthz', (_req, res) => {
 });
 
 app.use(express.json({ limit: '20mb' }));
+
+// Register SAP HANA Cloud integration routes
+registerSAPHanaRoutes(app);
 
 // Initialize Gemini client server-side per gemini-api skill
 let aiClient: GoogleGenAI | null = null;
