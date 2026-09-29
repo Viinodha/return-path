@@ -221,56 +221,129 @@ function createHdbClientInstance(config: HanaEnvConfig) {
   throw new Error('SAP HANA pure-JS driver (hdb) could not be initialized.');
 }
 
-export function runHdbQuery(sql: string, params: any[] = []): Promise<{ rows: any[]; latencyMs: number }> {
+export function runHdbQuery(sql: string, params: any[] = [], timeoutMs = 6000): Promise<{ rows: any[]; latencyMs: number }> {
   const config = getHanaEnvConfig();
   if (!config.host || !config.password) {
     throw new Error('SAP HANA Cloud host and password are not configured in server environment variables (HANA_HOST, HANA_PASSWORD).');
   }
 
   return new Promise((resolve, reject) => {
+    let timer: any = null;
+    let isSettled = false;
+    let client: any = null;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (client) {
+        try {
+          client.disconnect();
+        } catch {}
+      }
+    };
+
+    const done = (err: any, res?: any) => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
+      if (err) {
+        reject(err);
+      } else {
+        resolve(res);
+      }
+    };
+
+    timer = setTimeout(() => {
+      done(new Error(`Connection to SAP HANA Cloud timed out after ${timeoutMs}ms. Please check if your SAP HANA Cloud instance is 'Running' in SAP BTP and 'Allow all IP addresses (0.0.0.0/0)' is enabled in the IP Allowlist.`));
+    }, timeoutMs);
+
     try {
-      const client = createHdbClientInstance(config);
+      client = createHdbClientInstance(config);
+
+      if (typeof client.on === 'function') {
+        client.on('error', (err: any) => {
+          console.warn('[HDB Error Event caught]:', err?.message || err);
+          done(err);
+        });
+      }
 
       const start = Date.now();
       client.connect((err: any) => {
         if (err) {
-          return reject(err);
+          return done(err);
         }
 
         client.exec(sql, params, (execErr: any, rows: any) => {
           const latencyMs = Date.now() - start;
-          try {
-            client.disconnect();
-          } catch {}
           if (execErr) {
-            return reject(execErr);
+            return done(execErr);
           }
-          resolve({
+          done(null, {
             rows: Array.isArray(rows) ? rows : (rows ? [rows] : []),
             latencyMs,
           });
         });
       });
     } catch (clientInitErr) {
-      reject(clientInitErr);
+      done(clientInitErr);
     }
   });
 }
 
-export function runHdbTransaction(statements: string[]): Promise<{ executed: number; latencyMs: number }> {
+export function runHdbTransaction(statements: string[], timeoutMs = 8000): Promise<{ executed: number; latencyMs: number }> {
   const config = getHanaEnvConfig();
   if (!config.host || !config.password) {
     throw new Error('SAP HANA Cloud host and password are not configured in server environment variables (HANA_HOST, HANA_PASSWORD).');
   }
 
   return new Promise((resolve, reject) => {
+    let timer: any = null;
+    let isSettled = false;
+    let client: any = null;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (client) {
+        try {
+          client.disconnect();
+        } catch {}
+      }
+    };
+
+    const done = (err: any, res?: any) => {
+      if (isSettled) return;
+      isSettled = true;
+      cleanup();
+      if (err) {
+        reject(err);
+      } else {
+        resolve(res);
+      }
+    };
+
+    timer = setTimeout(() => {
+      done(new Error(`Transaction timed out after ${timeoutMs}ms on SAP HANA Cloud.`));
+    }, timeoutMs);
+
     try {
-      const client = createHdbClientInstance(config);
+      client = createHdbClientInstance(config);
+
+      if (typeof client.on === 'function') {
+        client.on('error', (err: any) => {
+          console.warn('[HDB Transaction Error caught]:', err?.message || err);
+          done(err);
+        });
+      }
 
       const start = Date.now();
       client.connect(async (err: any) => {
         if (err) {
-          return reject(err);
+          return done(err);
         }
 
         try {
@@ -294,66 +367,62 @@ export function runHdbTransaction(statements: string[]): Promise<{ executed: num
           });
 
           const latencyMs = Date.now() - start;
-          try {
-            client.disconnect();
-          } catch {}
-          resolve({ executed: statements.length, latencyMs });
+          done(null, { executed: statements.length, latencyMs });
         } catch (txErr: any) {
           try {
             client.rollback(() => {
-              try {
-                client.disconnect();
-              } catch {}
-              reject(txErr);
+              done(txErr);
             });
           } catch {
-            reject(txErr);
+            done(txErr);
           }
         }
       });
     } catch (clientInitErr) {
-      reject(clientInitErr);
+      done(clientInitErr);
     }
   });
 }
 
-export async function getLiveHanaTableCounts(): Promise<{
+export async function getLiveHanaTableCounts(timeoutMs = 3500): Promise<{
   RETURNPATH_PROFILES: number;
   RETURNPATH_SKILLS: number;
   RETURNPATH_MILESTONES: number;
   RETURNPATH_READINESS_LOG: number;
 }> {
   const counts = {
-    RETURNPATH_PROFILES: 0,
-    RETURNPATH_SKILLS: 0,
-    RETURNPATH_MILESTONES: 0,
-    RETURNPATH_READINESS_LOG: 0,
+    RETURNPATH_PROFILES: sandboxStore.profiles.length,
+    RETURNPATH_SKILLS: sandboxStore.skills.length,
+    RETURNPATH_MILESTONES: sandboxStore.milestones.length,
+    RETURNPATH_READINESS_LOG: sandboxStore.readinessLog.length,
   };
 
   const config = getHanaEnvConfig();
   if (!config.host || !config.password) {
-    return {
-      RETURNPATH_PROFILES: sandboxStore.profiles.length,
-      RETURNPATH_SKILLS: sandboxStore.skills.length,
-      RETURNPATH_MILESTONES: sandboxStore.milestones.length,
-      RETURNPATH_READINESS_LOG: sandboxStore.readinessLog.length,
-    };
+    return counts;
   }
 
   try {
-    const [pRes, sRes, mRes, rRes] = await Promise.all([
-      runHdbQuery('SELECT COUNT(*) AS TOTAL_COUNT FROM RETURNPATH_PROFILES').catch(() => ({ rows: [{ TOTAL_COUNT: 0 }] })),
-      runHdbQuery('SELECT COUNT(*) AS TOTAL_COUNT FROM RETURNPATH_SKILLS').catch(() => ({ rows: [{ TOTAL_COUNT: 0 }] })),
-      runHdbQuery('SELECT COUNT(*) AS TOTAL_COUNT FROM RETURNPATH_MILESTONES').catch(() => ({ rows: [{ TOTAL_COUNT: 0 }] })),
-      runHdbQuery('SELECT COUNT(*) AS TOTAL_COUNT FROM RETURNPATH_READINESS_LOG').catch(() => ({ rows: [{ TOTAL_COUNT: 0 }] })),
-    ]);
+    const singleQuery = `SELECT 
+      (SELECT COUNT(*) FROM RETURNPATH_PROFILES) AS C_PROFILES,
+      (SELECT COUNT(*) FROM RETURNPATH_SKILLS) AS C_SKILLS,
+      (SELECT COUNT(*) FROM RETURNPATH_MILESTONES) AS C_MILESTONES,
+      (SELECT COUNT(*) FROM RETURNPATH_READINESS_LOG) AS C_LOG
+    FROM DUMMY`;
 
-    counts.RETURNPATH_PROFILES = Number(pRes.rows[0]?.TOTAL_COUNT ?? pRes.rows[0]?.['COUNT(*)'] ?? 0);
-    counts.RETURNPATH_SKILLS = Number(sRes.rows[0]?.TOTAL_COUNT ?? sRes.rows[0]?.['COUNT(*)'] ?? 0);
-    counts.RETURNPATH_MILESTONES = Number(mRes.rows[0]?.TOTAL_COUNT ?? mRes.rows[0]?.['COUNT(*)'] ?? 0);
-    counts.RETURNPATH_READINESS_LOG = Number(rRes.rows[0]?.TOTAL_COUNT ?? rRes.rows[0]?.['COUNT(*)'] ?? 0);
-  } catch (err) {
-    console.warn('[HANA] Live table count error:', err);
+    const res = await runHdbQuery(singleQuery, [], timeoutMs);
+    if (res.rows && res.rows[0]) {
+      counts.RETURNPATH_PROFILES = Number(res.rows[0].C_PROFILES ?? res.rows[0].c_profiles ?? 0);
+      counts.RETURNPATH_SKILLS = Number(res.rows[0].C_SKILLS ?? res.rows[0].c_skills ?? 0);
+      counts.RETURNPATH_MILESTONES = Number(res.rows[0].C_MILESTONES ?? res.rows[0].c_milestones ?? 0);
+      counts.RETURNPATH_READINESS_LOG = Number(res.rows[0].C_LOG ?? res.rows[0].c_log ?? 0);
+    }
+  } catch {
+    // If unified query fails, try fast individual queries or fallback to default
+    try {
+      const pRes = await runHdbQuery('SELECT COUNT(*) AS CNT FROM RETURNPATH_PROFILES', [], 1500).catch(() => null);
+      if (pRes?.rows?.[0]) counts.RETURNPATH_PROFILES = Number(pRes.rows[0].CNT ?? 0);
+    } catch {}
   }
 
   return counts;

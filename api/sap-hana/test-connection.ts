@@ -10,7 +10,9 @@ export default async function handler(req: any, res: any) {
     let liveCounts = null;
 
     if (status.success) {
-      liveCounts = await getLiveHanaTableCounts();
+      try {
+        liveCounts = await getLiveHanaTableCounts(2500);
+      } catch {}
     }
 
     return res.status(200).json({
@@ -18,7 +20,7 @@ export default async function handler(req: any, res: any) {
       liveCounts,
     });
   } catch (error: any) {
-    return res.status(500).json({
+    return res.status(200).json({
       tested: true,
       success: false,
       errorMessage: error.message || 'Connection test failed',

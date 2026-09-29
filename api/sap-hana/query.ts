@@ -14,7 +14,7 @@ export default async function handler(req: any, res: any) {
     const result = await executeSqlSandbox(sql);
     return res.status(200).json(result);
   } catch (error: any) {
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       rows: [],
       columns: [],

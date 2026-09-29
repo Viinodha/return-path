@@ -9,7 +9,7 @@ export default async function handler(req: any, res: any) {
     const result = await bootstrapHanaSchema();
     return res.status(200).json(result);
   } catch (error: any) {
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
       message: error.message || 'Failed to bootstrap SAP HANA schema',
       tablesCreated: [],
