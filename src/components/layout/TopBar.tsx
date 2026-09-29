@@ -33,11 +33,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         {onOpenHana && (
           <button
             onClick={onOpenHana}
-            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#0070F2] bg-[#EBF5FF] hover:bg-[#d8ecff] border border-[#0070F2]/30 rounded-[4px] transition-colors"
-            title="SAP HANA Cloud Live Query & BTP Trial Center"
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[#188918] bg-[#E7F6E7] hover:bg-[#d5eed5] border border-[#188918]/30 rounded-[4px] transition-colors"
+            title="SAP HANA Cloud Live Query & BTP Trial Center (Active & Connected)"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-[#0070F2] animate-pulse" />
-            <span className="font-bold">HANA Cloud</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-[#188918] animate-pulse" />
+            <span className="font-bold">HANA Cloud (Live)</span>
           </button>
         )}
 

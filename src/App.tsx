@@ -92,57 +92,57 @@ export default function App() {
         />
 
         <main className="flex-1 flex overflow-y-auto">
-          {activeTab === 'companion' && (
+          <div className={activeTab === 'companion' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <CompanionView
               store={memoryStore}
               onNavigateToTab={tab => setActiveTab(tab as NavTab)}
             />
-          )}
+          </div>
 
-          {activeTab === 'dashboard' && (
+          <div className={activeTab === 'dashboard' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <DashboardView
               store={memoryStore}
               onNavigateToTab={tab => setActiveTab(tab as NavTab)}
               onOpenReadinessModal={() => setIsReadinessOpen(true)}
             />
-          )}
+          </div>
 
-          {activeTab === 'memory' && (
+          <div className={activeTab === 'memory' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <CareerMemoryView store={memoryStore} />
-          )}
+          </div>
 
-          {activeTab === 'learning' && (
+          <div className={activeTab === 'learning' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <LearningPathView
               store={memoryStore}
               onNavigateToTab={tab => setActiveTab(tab as NavTab)}
             />
-          )}
+          </div>
 
-          {activeTab === 'resume' && (
+          <div className={activeTab === 'resume' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <ResumeView store={memoryStore} />
-          )}
+          </div>
 
-          {activeTab === 'interview' && (
+          <div className={activeTab === 'interview' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <InterviewView
               store={memoryStore}
               onNavigateToTab={tab => setActiveTab(tab as NavTab)}
             />
-          )}
+          </div>
 
-          {activeTab === 'jobs' && (
+          <div className={activeTab === 'jobs' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <JobsView
               store={memoryStore}
               onNavigateToTab={tab => setActiveTab(tab as NavTab)}
             />
-          )}
+          </div>
 
-          {activeTab === 'report' && (
+          <div className={activeTab === 'report' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <ReportView store={memoryStore} />
-          )}
+          </div>
 
-          {activeTab === 'hana' && (
+          <div className={activeTab === 'hana' ? 'flex-1 flex flex-col min-w-0' : 'hidden'}>
             <SAPHanaView store={memoryStore} />
-          )}
+          </div>
         </main>
       </div>
 

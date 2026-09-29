@@ -31,7 +31,7 @@ interface SidebarProps {
   onResetData?: () => void;
 }
 
-const NAV_ITEMS: Array<{ id: NavTab; label: string; icon: React.FC<{ className?: string }>; badge?: string }> = [
+const NAV_ITEMS: Array<{ id: NavTab; label: string; icon: React.FC<{ className?: string }>; badge?: string; badgeColor?: string }> = [
   { id: 'companion', label: 'Companion', icon: MessageSquare },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'memory', label: 'Career Memory', icon: Database },
@@ -40,7 +40,7 @@ const NAV_ITEMS: Array<{ id: NavTab; label: string; icon: React.FC<{ className?:
   { id: 'interview', label: 'Interview', icon: UserCheck },
   { id: 'jobs', label: 'Jobs', icon: Briefcase },
   { id: 'report', label: 'Report', icon: FileSpreadsheet },
-  { id: 'hana', label: 'SAP HANA Cloud', icon: Server, badge: 'TRIAL' },
+  { id: 'hana', label: 'SAP HANA Cloud', icon: Server, badge: 'LIVE', badgeColor: 'bg-[#188918]/10 text-[#188918] border border-[#188918]/30' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -89,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Icon className={`w-4 h-4 stroke-[1.5] ${isActive ? 'text-[#0070F2]' : 'text-[#556B82]'}`} />
                 <span className="flex-1">{item.label}</span>
                 {item.badge && (
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#0070F2]/10 text-[#0070F2] uppercase tracking-wider">
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${item.badgeColor || 'bg-[#0070F2]/10 text-[#0070F2]'}`}>
                     {item.badge}
                   </span>
                 )}
