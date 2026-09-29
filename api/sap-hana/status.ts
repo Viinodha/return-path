@@ -1,4 +1,4 @@
-import { getPublicConfigStatus, getLiveHanaTableCounts } from '../_lib/hana.js';
+import { getPublicConfigStatus, getLiveHanaTableCounts } from '../_lib/hana';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') {

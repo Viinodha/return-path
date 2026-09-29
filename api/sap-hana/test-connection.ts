@@ -1,4 +1,4 @@
-import { testHanaConnection, getLiveHanaTableCounts } from '../_lib/hana.js';
+import { testHanaConnection, getLiveHanaTableCounts } from '../_lib/hana';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST' && req.method !== 'GET') {

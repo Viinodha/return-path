@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { registerSAPHanaRoutes } from './server-hana.js';
+import { registerSAPHanaRoutes } from './server-hana';
 
 dotenv.config();
 

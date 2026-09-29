@@ -6,7 +6,7 @@ import {
   pushDataToHana,
   executeSqlSandbox,
   getLiveHanaTableCounts,
-} from './api/_lib/hana.js';
+} from './api/_lib/hana';
 
 export function registerSAPHanaRoutes(app: express.Application) {
   // 1. Connection Status & Environment Config (Masked, no secret exposure)

@@ -1,4 +1,4 @@
-import { getAiClient } from './_lib/ai.js';
+import { getAiClient } from './_lib/ai';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {

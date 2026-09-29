@@ -1,4 +1,4 @@
-import { executeSqlSandbox } from '../_lib/hana.js';
+import { executeSqlSandbox } from '../_lib/hana';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
