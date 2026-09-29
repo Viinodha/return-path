@@ -124,14 +124,42 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     fetchSchemaInfo();
   }, []);
 
+  const safeFetchJson = async (url: string, options?: RequestInit) => {
+    try {
+      const res = await fetch(url, options);
+      const text = await res.text();
+      try {
+        const json = JSON.parse(text);
+        return { ok: res.ok, status: res.status, data: json };
+      } catch {
+        return {
+          ok: false,
+          status: res.status,
+          data: {
+            errorMessage: text && text.length < 200 ? text : `Server endpoint returned status ${res.status}. Check Vercel environment variables & logs.`,
+            errorCode: `HTTP_${res.status}`,
+          },
+        };
+      }
+    } catch (netErr: any) {
+      return {
+        ok: false,
+        status: 0,
+        data: {
+          errorMessage: netErr?.message || 'Network request failed',
+          errorCode: 'ERR_NETWORK',
+        },
+      };
+    }
+  };
+
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/sap-hana/status');
-      if (res.ok) {
-        const data = await res.json();
-        setStatus(data);
-        if (data.lastConnectionStatus?.tested) {
-          setTestResult(data.lastConnectionStatus);
+      const res = await safeFetchJson('/api/sap-hana/status');
+      if (res.ok && res.data) {
+        setStatus(res.data);
+        if (res.data.lastConnectionStatus?.tested) {
+          setTestResult(res.data.lastConnectionStatus);
         }
       }
     } catch (e) {
@@ -141,10 +169,9 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
 
   const fetchSchemaInfo = async () => {
     try {
-      const res = await fetch('/api/sap-hana/schema-info');
-      if (res.ok) {
-        const data = await res.json();
-        setSchemaInfo(data);
+      const res = await safeFetchJson('/api/sap-hana/schema-info');
+      if (res.ok && res.data) {
+        setSchemaInfo(res.data);
       }
     } catch (e) {
       console.error('Failed to fetch schema info:', e);
@@ -155,11 +182,18 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setLoading(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/sap-hana/test-connection', {
+      const res = await safeFetchJson('/api/sap-hana/test-connection', {
         method: 'POST',
       });
-      const data = await res.json();
-      setTestResult(data);
+      if (res.data) {
+        setTestResult(res.data);
+      } else {
+        setTestResult({
+          success: false,
+          errorMessage: `Connection test endpoint returned HTTP ${res.status}`,
+          errorCode: `HTTP_${res.status}`,
+        });
+      }
       await fetchStatus();
       await fetchSchemaInfo();
     } catch (err: any) {
@@ -177,10 +211,12 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setSchemaDeploying(true);
     setSchemaDeployLogs([]);
     try {
-      const res = await fetch('/api/sap-hana/bootstrap', { method: 'POST' });
-      const data = await res.json();
-      if (data.tablesCreated) {
+      const res = await safeFetchJson('/api/sap-hana/bootstrap', { method: 'POST' });
+      const data = res.data;
+      if (data?.tablesCreated) {
         setSchemaDeployLogs(data.tablesCreated.map((t: string) => `✔ Synced table: ${t}`));
+      } else if (data?.errorMessage || data?.error) {
+        setSchemaDeployLogs(['Schema initialization notice: ' + (data.errorMessage || data.error)]);
       }
       await fetchSchemaInfo();
     } catch (err: any) {
@@ -196,7 +232,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setSyncResult(null);
     try {
       const userState = store.getState();
-      const res = await fetch('/api/sap-hana/push', {
+      const res = await safeFetchJson('/api/sap-hana/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,12 +255,12 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
           },
         }),
       });
-      const data = await res.json();
+      const data = res.data;
       setSyncResult(data);
-      if (!res.ok || data.success === false) {
-        setSyncMessage(data.message || data.error || 'Failed to sync data to SAP HANA Cloud');
+      if (!res.ok || data?.success === false) {
+        setSyncMessage(data?.message || data?.errorMessage || data?.error || 'Failed to sync data to SAP HANA Cloud');
       } else {
-        setSyncMessage(data.message || 'Data synchronized & COMMITTED successfully into SAP HANA Cloud!');
+        setSyncMessage(data?.message || 'Data synchronized & COMMITTED successfully into SAP HANA Cloud!');
       }
       await fetchSchemaInfo();
       await fetchStatus();
@@ -246,13 +282,12 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
     setQueryLoading(true);
     setQueryResult(null);
     try {
-      const res = await fetch('/api/sap-hana/query', {
+      const res = await safeFetchJson('/api/sap-hana/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: q }),
       });
-      const data = await res.json();
-      setQueryResult(data);
+      setQueryResult(res.data);
     } catch (err: any) {
       setQueryResult({
         columns: [],
@@ -260,7 +295,7 @@ export const SAPHanaView: React.FC<SAPHanaViewProps> = ({ store }) => {
         rowCount: 0,
         latencyMs: 0,
         source: 'Error',
-        error: err?.message || 'Network error executing query',
+        error: err?.message || 'Failed to execute query',
       });
     } finally {
       setQueryLoading(false);

@@ -198,6 +198,29 @@ export function getPublicConfigStatus() {
   };
 }
 
+function createHdbClientInstance(config: HanaEnvConfig) {
+  const factory = (hdb as any)?.createClient || (hdb as any)?.default?.createClient;
+  if (typeof factory === 'function') {
+    return factory({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      useTLS: config.useTLS,
+    });
+  }
+  if (typeof (hdb as any) === 'function') {
+    return new (hdb as any)({
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      useTLS: config.useTLS,
+    });
+  }
+  throw new Error('SAP HANA pure-JS driver (hdb) could not be initialized.');
+}
+
 export function runHdbQuery(sql: string, params: any[] = []): Promise<{ rows: any[]; latencyMs: number }> {
   const config = getHanaEnvConfig();
   if (!config.host || !config.password) {
@@ -205,32 +228,32 @@ export function runHdbQuery(sql: string, params: any[] = []): Promise<{ rows: an
   }
 
   return new Promise((resolve, reject) => {
-    const client = hdb.createClient({
-      host: config.host,
-      port: config.port,
-      user: config.user,
-      password: config.password,
-      useTLS: config.useTLS,
-    });
+    try {
+      const client = createHdbClientInstance(config);
 
-    const start = Date.now();
-    client.connect((err: any) => {
-      if (err) {
-        return reject(err);
-      }
-
-      client.exec(sql, params, (execErr: any, rows: any) => {
-        const latencyMs = Date.now() - start;
-        client.disconnect();
-        if (execErr) {
-          return reject(execErr);
+      const start = Date.now();
+      client.connect((err: any) => {
+        if (err) {
+          return reject(err);
         }
-        resolve({
-          rows: Array.isArray(rows) ? rows : (rows ? [rows] : []),
-          latencyMs,
+
+        client.exec(sql, params, (execErr: any, rows: any) => {
+          const latencyMs = Date.now() - start;
+          try {
+            client.disconnect();
+          } catch {}
+          if (execErr) {
+            return reject(execErr);
+          }
+          resolve({
+            rows: Array.isArray(rows) ? rows : (rows ? [rows] : []),
+            latencyMs,
+          });
         });
       });
-    });
+    } catch (clientInitErr) {
+      reject(clientInitErr);
+    }
   });
 }
 
@@ -241,50 +264,56 @@ export function runHdbTransaction(statements: string[]): Promise<{ executed: num
   }
 
   return new Promise((resolve, reject) => {
-    const client = hdb.createClient({
-      host: config.host,
-      port: config.port,
-      user: config.user,
-      password: config.password,
-      useTLS: config.useTLS,
-    });
+    try {
+      const client = createHdbClientInstance(config);
 
-    const start = Date.now();
-    client.connect(async (err: any) => {
-      if (err) {
-        return reject(err);
-      }
-
-      try {
-        for (const sql of statements) {
-          await new Promise<void>((resSql, rejSql) => {
-            client.exec(sql, (execErr: any) => {
-              if (execErr) {
-                return rejSql(new Error(`SQL Execution Error on [${sql.substring(0, 100)}]: ${execErr.message || execErr}`));
-              }
-              resSql();
-            });
-          });
+      const start = Date.now();
+      client.connect(async (err: any) => {
+        if (err) {
+          return reject(err);
         }
 
-        // Explicitly commit transaction to persistent disk
-        await new Promise<void>((resCommit, rejCommit) => {
-          client.commit((commitErr: any) => {
-            if (commitErr) return rejCommit(new Error(`COMMIT Error: ${commitErr.message || commitErr}`));
-            resCommit();
-          });
-        });
+        try {
+          for (const sql of statements) {
+            await new Promise<void>((resSql, rejSql) => {
+              client.exec(sql, (execErr: any) => {
+                if (execErr) {
+                  return rejSql(new Error(`SQL Execution Error on [${sql.substring(0, 100)}]: ${execErr.message || execErr}`));
+                }
+                resSql();
+              });
+            });
+          }
 
-        const latencyMs = Date.now() - start;
-        client.disconnect();
-        resolve({ executed: statements.length, latencyMs });
-      } catch (txErr: any) {
-        client.rollback(() => {
-          client.disconnect();
-          reject(txErr);
-        });
-      }
-    });
+          // Explicitly commit transaction to persistent disk
+          await new Promise<void>((resCommit, rejCommit) => {
+            client.commit((commitErr: any) => {
+              if (commitErr) return rejCommit(new Error(`COMMIT Error: ${commitErr.message || commitErr}`));
+              resCommit();
+            });
+          });
+
+          const latencyMs = Date.now() - start;
+          try {
+            client.disconnect();
+          } catch {}
+          resolve({ executed: statements.length, latencyMs });
+        } catch (txErr: any) {
+          try {
+            client.rollback(() => {
+              try {
+                client.disconnect();
+              } catch {}
+              reject(txErr);
+            });
+          } catch {
+            reject(txErr);
+          }
+        }
+      });
+    } catch (clientInitErr) {
+      reject(clientInitErr);
+    }
   });
 }
 
